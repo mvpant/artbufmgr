@@ -91,14 +91,15 @@ besides throughput improvement:
 
 ## Installation
 There are two options to try the ART as an alternative data structure:
-- a) to apply the patch from this repository to the [clean 11.3 branch](https://github.com/postgres/postgres/tree/REL_11_3) (recommended)
+- a) to apply the [patch](./artbuf_final.patch) from this repository to the [clean 11.3 branch](https://github.com/postgres/postgres/tree/REL_11_3) (recommended)
 
 This is a squashed version of the working branch with non-relevant stuff removed.
 DEFINEs that were used to guard hash/tree, so each algorithm can be used interchangeably or simultaneously (for testing purpose) are also removed. Hash relevant functionality is removed from the signatures of the functions. ***This patch was used in the final perfomance test.***
 ```sh
 git clone https://github.com/postgres/postgres
 cd postgres
-
+git checkout -b v11_3 tags/REL_11_3
+git am artbuf_final.patch
 ```
 
 - b) to clone the working [branch](https://github.com/mvpant/postgres/tree/artbufmgr)
