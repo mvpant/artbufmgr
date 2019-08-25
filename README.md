@@ -90,11 +90,127 @@ besides throughput improvement:
 * A "path" to specific subtree of the main tree can be cached in SMgrRelation data structure, therefore reducing the cost of lookup operation from 20 to 4 bytes.
 
 ## Installation
-There are two options to use ART as an alternative data structure:
-- a) to clone this [branch](https://github.com/mvpant/postgres/tree/artbufmgr)
-- b) to apply the patch from this repository to the [clean 11.3 branch](https://github.com/postgres/postgres/tree/REL_11_3) (preferable)
+There are two options to try the ART as an alternative data structure:
+- a) to apply the patch from this repository to the [clean 11.3 branch](https://github.com/postgres/postgres/tree/REL_11_3) (recommended)
 
+This is a squashed version of the working branch with non-relevant stuff removed.
+DEFINEs that were used to guard hash/tree, so each algorithm can be used interchangeably or simultaneously (for testing purpose) are also removed. Hash relevant functionality is removed from the signatures of the functions. ***This patch was used in the final perfomance test.***
+```sh
+git clone https://github.com/postgres/postgres
+cd postgres
 
+```
+
+- b) to clone the working [branch](https://github.com/mvpant/postgres/tree/artbufmgr)
+
+After getting the source code one should build the PostgreSQL:
+```sh
+cd postgres
+mkdir -p $HOME/builds/pg113-art
+make clean
+./configure --prefix=$HOME/builds/pg/pg113-art
+make -j4
+make install
+```
+
+And [pg_buffercache](https://www.postgresql.org/docs/current/pgbuffercache.html) extension that now has two additional functions to monitor the activity of the ART.
+```sh
+cd contrib/pg_buffercache
+make install
+```
+
+Now open up two terminals and run in both either:
+```sh
+cd $HOME/builds/pg113-art/bin && export PATH=$(pwd):$PATH
+```
+or
+```sh
+export PATH=$HOME/builds/pg113-art/bin:$PATH
+```
+
+Create and start a PostgreSQL database cluster in the terminal 1:
+```sh
+mkdir -p $HOME/dbs/pg11
+initdb -pgdata=$HOME/dbs/pg11
+pg_ctl start -D ~/dbs/pg11
+```
+Switch to the terminal 2:
+```sh
+createdb testdb
+psql testdb
+create extension pg_buffercache;
+```
+
+And now you can select the extension's views to monitor ART activity:
+```sh
+\x
+select * from pg_buffertree_common;
+-[ RECORD 1 ]--+--------
+leaves_used    | 85
+node4_used     | 15
+node16_used    | 3
+node48_used    | 2
+node256_used   | 0
+subtrees_used  | 25
+leaves_total   | 16484
+node4_total    | 8192
+node16_total   | 4096
+node48_total   | 512
+node256_total  | 256
+subtrees_total | 10000
+leaves_mem     | 263744
+node4_mem      | 524288
+node16_mem     | 720896
+node48_mem     | 344064
+node256_mem    | 532480
+subtrees_mem   | 1200104
+\x
+select * from pg_buffertree;
+ relfilenode | reltablespace | reldatabase | relforknumber | nleaves | nelem4 | nelem16 | nelem48 | nelem256 
+-------------+---------------+-------------+---------------+---------+--------+---------+---------+----------
+        2601 |          1663 |       16384 |             0 |       1 |      0 |       0 |       0 |        0
+        2603 |          1663 |       16384 |             0 |       4 |      1 |       0 |       0 |        0
+        2610 |          1663 |       16384 |             0 |       3 |      1 |       0 |       0 |        0
+...
+        2693 |          1663 |       16384 |             0 |       2 |      1 |       0 |       0 |        0
+        2703 |          1663 |       16384 |             0 |       3 |      1 |       0 |       0 |        0
+        1247 |          1663 |       16384 |             0 |       2 |      1 |       0 |       0 |        0
+        1249 |          1663 |       16384 |             0 |      25 |      0 |       0 |       1 |        0
+...
+           0 |             0 |           0 |             0 |      49 |      2 |       3 |       1 |        0
+(50 rows)
+
+```
+
+```sql
+create view buffertree_agg as
+SELECT c.relname,
+    sum(t.nleaves) as nleaves, sum(t.nelem4) as nelem4,
+    sum(t.nelem16) as nelem16, sum(t.nelem48) as nelem48,
+    sum(t.nelem256) as nelem256
+FROM pg_buffertree t INNER JOIN pg_class c
+ON t.relfilenode = pg_relation_filenode(c.oid) AND
+t.reldatabase IN (0, (SELECT oid FROM pg_database
+                      WHERE datname = current_database()))
+GROUP BY c.relname
+ORDER BY 2 DESC;
+
+select * from buffertree_agg;
+                 relname                 | nleaves | nelem4 | nelem16 | nelem48 | nelem256 
+-----------------------------------------+---------+--------+---------+---------+----------
+ pg_attribute                            |      29 |      1 |       0 |       1 |        0
+ pg_class                                |      15 |      1 |       1 |       0 |        0
+ pg_depend_reference_index               |      13 |      0 |       1 |       0 |        0
+ pg_depend                               |      12 |      0 |       1 |       0 |        0
+ pg_proc                                 |       9 |      0 |       1 |       0 |        0
+ pg_attribute_relid_attnum_index         |       7 |      0 |       1 |       0 |        0
+ pg_proc_oid_index                       |       7 |      0 |       1 |       0 |        0
+ pg_type                                 |       6 |      0 |       1 |       0 |        0
+...
+ pg_db_role_setting                      |       1 |      0 |       0 |       0 |        0
+(59 rows)
+
+```
 
 ## Results
 All the numerical evaluations are presented in the following [google spreadsheet](https://docs.google.com/spreadsheets/d/1VfVY0NUnPQYqgxMEXkpxhHvspbT9uZPRV9mflu8UhLQ/edit?usp=sharing).
